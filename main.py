@@ -1,4 +1,5 @@
 # streamlit_app.py
+
 import streamlit as st
 import requests
 import pandas as pd
@@ -30,7 +31,7 @@ if "points" not in st.session_state:
 if "route_data" not in st.session_state:
     st.session_state.route_data = None
 
-# 🔽 Вибір режиму відображення мапи
+# --- 🔽 Вибір режиму відображення мапи ---
 mode = st.selectbox("Оберіть режим карти:", [
     "🌍 Забруднення",
     "🗺️ Граф доріг",
@@ -38,28 +39,28 @@ mode = st.selectbox("Оберіть режим карти:", [
     "🧩 Кластери"
 ])
 
-# Ініціалізація змінних сесії для точок маршруту
+# --- Ініціалізація змінних сесії для точок маршруту ---
 if 'points' not in st.session_state:
     st.session_state.points = []
 if 'route_data' not in st.session_state:
     st.session_state.route_data = None
 
-# Базова мапа
+# --- Базова мапа ---
 m = folium.Map(location=[50.45, 30.52], zoom_start=12)
 folium.LatLngPopup().add_to(m)
 
-# Перемикачі для оверлеїв
+# --- Перемикачі для оверлеїв ---
 show_pollution = st.checkbox("Забруднення", value=True)
 show_heatmap = st.checkbox("Теплова мапа", value=True)
 show_routes = st.checkbox("Маршрути", value=False)
 show_clusters = st.checkbox("Кластери", value=False)
 
-# Базова карта
+# --- Базова карта ---
 m = folium.Map(location=[50.45, 30.52], zoom_start=12)
 
 output = st_folium(m, width=700, height=500)
 
-# --- Pollution Layer ---
+# --- Рівень забруднення ---
 if show_pollution:
     try:
         resp = requests.get(f"http://localhost:8000/cities/{city}/pollution")
@@ -112,11 +113,11 @@ if show_pollution:
     except Exception as e:
         st.error(f"Помилка при завантаженні забруднення: {e}")
 
-# --- Routes Layer ---
+# --- Рівень маршрутів ---
 if show_routes:
     fg_routes = folium.FeatureGroup(name="Маршрути", overlay=True, control=True)
 
-    # Додавання маркерів вибраних точок для маршруту
+    # --- Додавання маркерів вибраних точок для маршруту ---
     if st.session_state.points:
         for i, point in enumerate(st.session_state.points):
             folium.Marker(
@@ -125,7 +126,7 @@ if show_routes:
                 icon=folium.Icon(color="red" if i == 0 else "green", icon="flag")
             ).add_to(fg_routes)
 
-    # Якщо є дані маршруту, відобразити їх
+    # --- Якщо є дані маршруту, відобразити їх ---
     if st.session_state.route_data:
         route_coords = st.session_state.route_data.get("route", [])
         if route_coords:
@@ -138,13 +139,13 @@ if show_routes:
 
     fg_routes.add_to(m)
 
-# Обробка кліків, якщо в режимі побудови маршруту
+# --- Обробка кліків, якщо в режимі побудови маршруту ---
 if mode == "📍 Побудова маршруту" and output and output.get("last_clicked"):
     latlon = output["last_clicked"]
     if len(st.session_state.points) < 2:
         st.session_state.points.append((latlon["lat"], latlon["lng"]))
 
-# Інтерфейс для побудови маршруту
+# --- Інтерфейс для побудови маршруту ---
 if mode == "📍 Побудова маршруту":
     if len(st.session_state.points) > 0:
         st.write(f"Вибрані точки ({len(st.session_state.points)}/2):")
@@ -176,7 +177,7 @@ if mode == "📍 Побудова маршруту":
                 st.session_state.points = []
                 st.session_state.route_data = None
 
-# --- Clusters Layer ---
+# --- Рівень кластерів ---
 if show_clusters:
     try:
         resp = requests.get(f"http://localhost:8000/cities/{city}/clusters")
@@ -197,8 +198,8 @@ if show_clusters:
     except Exception as e:
         st.error(f"Помилка при завантаженні кластерів: {e}")
 
-# --- Controls ---
+# --- Керування рівнями ---
 folium.LayerControl(collapsed=False).add_to(m)
 
-# Виведення карти
+# --- Виведення карти ---
 st_folium(m, width=700, height=500)
