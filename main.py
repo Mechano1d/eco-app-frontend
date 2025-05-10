@@ -4,11 +4,12 @@ import streamlit as st
 import requests
 import pandas as pd
 import folium
-from folium.plugins import HeatMap
+from folium.plugins import HeatMap, MarkerCluster
 from streamlit_folium import st_folium
 from io import BytesIO
 from PIL import Image
 import base64
+from copy import deepcopy
 
 API_URL = "http://localhost:8000"
 
@@ -35,6 +36,11 @@ if "collected_data" not in st.session_state:
 # Результати статистичного аналізу
 if "analysis_results" not in st.session_state:
     st.session_state.analysis_results = None
+
+# Мапа
+if 'base_map' not in st.session_state:
+    st.session_state.base_map = folium.Map(location=[50.45, 30.52], zoom_start=12)
+    folium.LatLngPopup().add_to(st.session_state.base_map)
 
 city = st.text_input("Введіть назву міста:", value="Kyiv")
 
@@ -66,11 +72,11 @@ if st.session_state.initialized and st.session_state.collected_data:
         res = requests.get(f"{API_URL}/cities/{city}/full_analysis")
         st.session_state.analysis_results = res.json()
 
-    if st.session_state.analysis_results:
-        st.write(st.session_state.analysis_results)
+    #if st.session_state.analysis_results:
+        # st.write(st.session_state.analysis_results)
 
     # --- Базова мапа ---
-    m = folium.Map(location=[50.45, 30.52], zoom_start=12)
+    m = deepcopy(st.session_state.base_map)
     folium.LatLngPopup().add_to(m)
 
     # --- Забруднення ---
@@ -90,7 +96,6 @@ if st.session_state.initialized and st.session_state.collected_data:
                 HeatMap(
                     heat_data,
                     min_opacity=0.9,
-                    max_val=5,
                     radius=10,
                     blur=15,
                 ).add_to(fg_pollution)
@@ -115,21 +120,27 @@ if st.session_state.initialized and st.session_state.collected_data:
     # --- Кластери ---
     if show_clusters:
         try:
-            resp = requests.get(f"http://localhost:8000/cities/{city}/clusters")
-            resp.raise_for_status()
-            clusters = resp.json()
+            clusters = st.session_state.analysis_results["clusters"]
+            # st.write(clusters)
 
             fg_clusters = folium.FeatureGroup(name="Кластери", overlay=True, control=True)
+
+            marker_cluster = MarkerCluster().add_to(fg_clusters)
+
             for item in clusters:
+                color = {
+                    0: "red", 1: "orange", 2: "yellow", 3: "green", 4: "blue"
+                }.get(item['cluster'], "gray")
+
                 folium.CircleMarker(
                     location=[item["latitude"], item["longitude"]],
                     radius=5,
-                    color="green",
+                    color=color,
                     fill=True,
                     fill_opacity=0.5,
                     popup=f"Кластер: {item['cluster']}"
-                ).add_to(fg_clusters)
-            fg_clusters.add_to(m)
+                ).add_to(marker_cluster)
+            marker_cluster.add_to(m)
         except Exception as e:
             st.error(f"Помилка при завантаженні кластерів: {e}")
 
