@@ -6,9 +6,11 @@ import pandas as pd
 import folium
 from folium.plugins import HeatMap, MarkerCluster
 from streamlit_folium import st_folium
+import plotly.graph_objects as go
 from io import BytesIO
 from PIL import Image
 import base64
+import plotly.express as px
 from copy import deepcopy
 
 API_URL = "http://localhost:8000"
@@ -33,6 +35,10 @@ if "initialized" not in st.session_state:
 if "collected_data" not in st.session_state:
     st.session_state.collected_data = False
 
+# Наявність екологічних даних
+if "pollution_data" not in st.session_state:
+    st.session_state.pollution_data = False
+
 # Результати статистичного аналізу
 if "analysis_results" not in st.session_state:
     st.session_state.analysis_results = None
@@ -53,7 +59,7 @@ if st.button("Ініціалізувати місто"):
 if st.button("Зібрати дані"):
     res = requests.get(f"{API_URL}/cities/{city}/collect_data")
     st.session_state.collected_data = True
-    st.write(res.json())
+    st.session_state.pollution_data = res.json()["data"]
 
 
 
@@ -65,15 +71,117 @@ show_routes = st.sidebar.checkbox("Показати маршрут", value=False
 show_clusters = st.sidebar.checkbox("Показати кластери", value=False)
 enable_routing = st.sidebar.checkbox("Режим побудови маршруту", value=False)
 
-st.write(st.session_state.initialized, st.session_state.collected_data)
 if st.session_state.initialized and st.session_state.collected_data:
 
     if st.button("Аналіз даних"):
         res = requests.get(f"{API_URL}/cities/{city}/full_analysis")
         st.session_state.analysis_results = res.json()
 
-    #if st.session_state.analysis_results:
-        # st.write(st.session_state.analysis_results)
+    if st.session_state.analysis_results:
+
+        # Ключі до розподілів у session_state.analysis_results
+        param_display_names = {
+            "co_distribution": "CO (чадний газ)",
+            "no2_distribution": "NO₂ (діоксид азоту)",
+            "pm_2_5_distribution": "PM2.5 (дрібні частинки)",
+            "pm_10_distribution": "PM10 (крупні частинки)"
+        }
+
+        selected_dist_key = st.selectbox(
+            "Оберіть параметр для побудови гістограми:",
+            options=list(param_display_names.keys()),
+            format_func=lambda k: param_display_names[k]
+        )
+
+        try:
+            distribution_data = st.session_state.analysis_results.get(selected_dist_key, {})
+
+            if not distribution_data:
+                st.warning("Немає даних для вибраного параметра.")
+            else:
+                dist_df = pd.DataFrame({
+                    "Інтервал": list(distribution_data.keys()),
+                    "Кількість точок": list(distribution_data.values())
+                })
+
+                fig = px.bar(
+                    dist_df,
+                    x="Кількість точок",
+                    y="Інтервал",
+                    orientation="h",
+                    color="Інтервал",
+                    color_discrete_sequence=px.colors.sequential.Plasma,
+                    title=f"Розподіл значень: {param_display_names[selected_dist_key]}"
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Помилка при візуалізації: {e}")
+
+        # --- Кореляції ---
+        st.subheader("Кореляція між трафіком та забрудненням")
+
+        correlations = st.session_state.analysis_results.get("correlations", [])
+        if correlations:
+            df_corr = pd.DataFrame(correlations)
+            df_corr["значущість"] = df_corr["significant"].apply(lambda x: "✔️" if x else "✖️")
+            st.dataframe(df_corr[["parameter", "correlation", "p_value", "значущість"]])
+
+        # --- Регресії ---
+        st.subheader("Лінійна регресія: як трафік впливає на забруднення")
+
+        regressions = st.session_state.analysis_results.get("regression_models", [])
+        if regressions:
+            df_reg = pd.DataFrame(regressions)
+            st.dataframe(df_reg[["parameter", "equation", "r2_score"]])
+
+        st.subheader("Лінійна регресія: Вплив трафіку на забруднення")
+        regression_models = st.session_state.analysis_results["regression_models"]  # або як воно в тебе називається
+        pollution_data = pd.DataFrame(st.session_state.pollution_data)  # або окремо передане
+
+        for result in regression_models:
+            param = result["parameter"]
+            st.markdown(f"**{param}** — R² = {result['r2_score']:.3f}")
+
+            # Витягуємо дані
+            df = pollution_data[["traffic_intensity", param]].dropna()
+
+            if df.empty:
+                st.warning(f"Недостатньо даних для {param}")
+                continue
+
+            # Передбачення
+            X = df["traffic_intensity"]
+            y = df[param]
+            y_pred = result["intercept"] + result["coefficient"] * X
+
+            # Створюємо графік
+            fig = go.Figure()
+
+            fig.add_trace(go.Scatter(
+                x=X, y=y,
+                mode='markers',
+                name='Спостереження',
+                marker=dict(color='blue', size=6)
+            ))
+
+            fig.add_trace(go.Scatter(
+                x=X, y=y_pred,
+                mode='lines',
+                name='Лінія регресії',
+                line=dict(color='red', width=2)
+            ))
+
+            fig.update_layout(
+                title=f"Залежність {param} від трафіку",
+                xaxis_title="Інтенсивність трафіку",
+                yaxis_title=param,
+                height=400
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
 
     # --- Базова мапа ---
     m = deepcopy(st.session_state.base_map)
