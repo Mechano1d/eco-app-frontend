@@ -39,6 +39,10 @@ if "collected_data" not in st.session_state:
 if "pollution_data" not in st.session_state:
     st.session_state.pollution_data = False
 
+# Наявність екологічних даних для мапи
+if "map_pollution" not in st.session_state:
+    st.session_state.map_pollution = None
+
 # Результати статистичного аналізу
 if "analysis_results" not in st.session_state:
     st.session_state.analysis_results = None
@@ -56,11 +60,20 @@ if st.button("Ініціалізувати місто"):
     st.session_state.initialized = True
     st.write(res.json())
 
+if not st.session_state.initialized:
+    st.badge("Не ініціалізовано", icon=":material/exclamation:", color="red")
+else:
+    st.badge("Ініціалізовано", icon=":material/check:", color="green")
+
 if st.button("Зібрати дані"):
     res = requests.get(f"{API_URL}/cities/{city}/collect_data")
     st.session_state.collected_data = True
     st.session_state.pollution_data = res.json()["data"]
 
+if not st.session_state.collected_data:
+    st.badge("Не зібрано екологічні дані", icon=":material/exclamation:", color="red")
+else:
+    st.badge("Екологічні дані зібрано", icon=":material/check:", color="green")
 
 
 # --- Вибір шарів для відображення ---
@@ -71,16 +84,28 @@ show_routes = st.sidebar.checkbox("Показати маршрут", value=False
 show_clusters = st.sidebar.checkbox("Показати кластери", value=False)
 enable_routing = st.sidebar.checkbox("Режим побудови маршруту", value=False)
 
+# Вибір типу візуалізації кластерів
+cluster_display_type = st.sidebar.selectbox(
+    "Тип відображення кластерів:",
+    ("MarkerCluster", "CircleMarker")
+)
+
 if st.session_state.initialized and st.session_state.collected_data:
 
     if st.button("Аналіз даних"):
         res = requests.get(f"{API_URL}/cities/{city}/full_analysis")
         st.session_state.analysis_results = res.json()
 
+    if not st.session_state.analysis_results:
+        st.badge("Аналіз даних не виконано", icon=":material/exclamation:", color="red")
+    else:
+        st.badge("Аналіз даних виконано", icon=":material/check:", color="green")
+
     if st.session_state.analysis_results:
 
         # Ключі до розподілів у session_state.analysis_results
         param_display_names = {
+            "aqi_distribution": "AQI (індекс якості повітря)",
             "co_distribution": "CO (чадний газ)",
             "no2_distribution": "NO₂ (діоксид азоту)",
             "pm_2_5_distribution": "PM2.5 (дрібні частинки)",
@@ -137,8 +162,8 @@ if st.session_state.initialized and st.session_state.collected_data:
             st.dataframe(df_reg[["parameter", "equation", "r2_score"]])
 
         st.subheader("Лінійна регресія: Вплив трафіку на забруднення")
-        regression_models = st.session_state.analysis_results["regression_models"]  # або як воно в тебе називається
-        pollution_data = pd.DataFrame(st.session_state.pollution_data)  # або окремо передане
+        regression_models = st.session_state.analysis_results["regression_models"]
+        pollution_data = pd.DataFrame(st.session_state.pollution_data)
 
         for result in regression_models:
             param = result["parameter"]
@@ -190,9 +215,12 @@ if st.session_state.initialized and st.session_state.collected_data:
     # --- Забруднення ---
     if show_pollution:
         try:
-            resp = requests.get(f"http://localhost:8000/cities/{city}/pollution")
-            resp.raise_for_status()
-            data = resp.json()
+            if st.session_state.map_pollution is None:
+                resp = requests.get(f"http://localhost:8000/cities/{city}/pollution")
+                resp.raise_for_status()
+                st.session_state.map_pollution = resp.json()
+
+            data = st.session_state.map_pollution
 
             fg_pollution = folium.FeatureGroup(name="Забруднення", overlay=True, control=True)
 
@@ -227,30 +255,54 @@ if st.session_state.initialized and st.session_state.collected_data:
 
     # --- Кластери ---
     if show_clusters:
-        try:
-            clusters = st.session_state.analysis_results["clusters"]
-            # st.write(clusters)
+        if cluster_display_type == "MarkerCluster":
+            try:
+                clusters = st.session_state.analysis_results["clusters"]
+                # st.write(clusters)
 
-            fg_clusters = folium.FeatureGroup(name="Кластери", overlay=True, control=True)
+                fg_clusters = folium.FeatureGroup(name="Кластери", overlay=True, control=True)
 
-            marker_cluster = MarkerCluster().add_to(fg_clusters)
+                marker_cluster = MarkerCluster().add_to(fg_clusters)
 
-            for item in clusters:
-                color = {
-                    0: "red", 1: "orange", 2: "yellow", 3: "green", 4: "blue"
-                }.get(item['cluster'], "gray")
+                for item in clusters:
+                    color = {
+                        0: "red", 1: "orange", 2: "yellow", 3: "green", 4: "blue"
+                    }.get(item['cluster'], "gray")
 
-                folium.CircleMarker(
-                    location=[item["latitude"], item["longitude"]],
-                    radius=5,
-                    color=color,
-                    fill=True,
-                    fill_opacity=0.5,
-                    popup=f"Кластер: {item['cluster']}"
-                ).add_to(marker_cluster)
-            marker_cluster.add_to(m)
-        except Exception as e:
-            st.error(f"Помилка при завантаженні кластерів: {e}")
+                    folium.CircleMarker(
+                        location=[item["latitude"], item["longitude"]],
+                        radius=5,
+                        color=color,
+                        fill=True,
+                        fill_opacity=0.5,
+                        popup=f"Кластер: {item['cluster']}"
+                    ).add_to(marker_cluster)
+                marker_cluster.add_to(m)
+            except Exception as e:
+                st.error(f"Помилка при завантаженні кластерів: {e}")
+        else:
+            try:
+                clusters = st.session_state.analysis_results["clusters"]
+
+                fg_clusters = folium.FeatureGroup(name="Кластери", overlay=True, control=True)
+
+                for item in clusters:
+                    color = {
+                        0: "red", 1: "orange", 2: "yellow", 3: "green", 4: "blue"
+                    }.get(item['cluster'], "gray")
+
+                    folium.CircleMarker(
+                        location=[item["latitude"], item["longitude"]],
+                        radius=5,
+                        color=color,
+                        fill=True,
+                        fill_opacity=0.5,
+                        popup=f"Кластер: {item['cluster']}"
+                    ).add_to(fg_clusters)
+
+                fg_clusters.add_to(m)
+            except Exception as e:
+                st.error(f"Помилка при завантаженні кластерів: {e}")
 
     # --- Маршрути ---
     fg_routes = None
@@ -278,7 +330,7 @@ if st.session_state.initialized and st.session_state.collected_data:
             fg_routes.add_to(m)
 
     # --- Обробка кліку по мапі ---
-    output = st_folium(m, width=700, height=500)
+    output = st_folium(m, width=1000, height=1000)
 
     if enable_routing and output and output.get("last_clicked"):
         latlon = output["last_clicked"]
